@@ -45,6 +45,10 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Download fonts (Cyrillic)
+        working-directory: ${{ env.APP_DIR }}
+        run: bash get_fonts.sh || true
+
       - name: Build release APK
         working-directory: ${{ env.APP_DIR }}
         run: gradle assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
