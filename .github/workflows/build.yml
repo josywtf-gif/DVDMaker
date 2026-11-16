@@ -33,6 +33,28 @@ jobs:
           if [ -z "$S" ]; then echo "settings.gradle.kts not found"; exit 1; fi
           echo "APP_DIR=$(dirname "$S")" >> "$GITHUB_ENV"
 
+      - name: Add AI background-removal model to APK assets
+        run: |
+          set -e
+          MODEL=""
+          for c in plugin/model_fp16.onnx .github/plugin/model_fp16.onnx; do
+            if [ -f "$GITHUB_WORKSPACE/$c" ]; then MODEL="$GITHUB_WORKSPACE/$c"; break; fi
+          done
+          if [ -z "$MODEL" ]; then
+            echo "::error::model_fp16.onnx not found (expected plugin/model_fp16.onnx or .github/plugin/model_fp16.onnx in the repository)"
+            exit 1
+          fi
+          SIZE=$(stat -c %s "$MODEL")
+          echo "Model: $MODEL ($SIZE bytes)"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "::error::model_fp16.onnx is too small - looks like a Git LFS pointer, not the real model"
+            exit 1
+          fi
+          DEST="$GITHUB_WORKSPACE/$APP_DIR/app/src/main/assets/models"
+          mkdir -p "$DEST"
+          cp "$MODEL" "$DEST/bgremove.onnx"
+          ls -l "$DEST"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
