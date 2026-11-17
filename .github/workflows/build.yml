@@ -33,6 +33,25 @@ jobs:
           if [ -z "$S" ]; then echo "settings.gradle.kts not found"; exit 1; fi
           echo "APP_DIR=$(dirname "$S")" >> "$GITHUB_ENV"
 
+      - name: Restore release signing key
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "::error::GitHub secret RELEASE_KEYSTORE_BASE64 is not configured"
+            exit 1
+          fi
+          KEYSTORE="$GITHUB_WORKSPACE/$APP_DIR/app/dvdmaker.jks"
+          mkdir -p "$(dirname "$KEYSTORE")"
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          if [ ! -s "$KEYSTORE" ]; then
+            echo "::error::Decoded release keystore is empty"
+            exit 1
+          fi
+          chmod 600 "$KEYSTORE"
+          echo "RELEASE_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+
       - name: Add AI background-removal model to APK assets
         run: |
           set -e
@@ -73,7 +92,21 @@ jobs:
 
       - name: Build release APK
         working-directory: ${{ env.APP_DIR }}
-        run: gradle assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_STORE_PASSWORD" || { echo "::error::RELEASE_STORE_PASSWORD is not configured"; exit 1; }
+          test -n "$RELEASE_KEY_ALIAS" || { echo "::error::RELEASE_KEY_ALIAS is not configured"; exit 1; }
+          test -n "$RELEASE_KEY_PASSWORD" || { echo "::error::RELEASE_KEY_PASSWORD is not configured"; exit 1; }
+          gradle assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
+
+      - name: Remove temporary release keystore
+        if: always()
+        run: |
+          if [ -n "${RELEASE_KEYSTORE_PATH:-}" ]; then rm -f "$RELEASE_KEYSTORE_PATH"; fi
 
       - name: Prepare APK
         run: |
