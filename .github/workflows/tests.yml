@@ -1,0 +1,71 @@
+name: Android tests DVDMaker
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-dvdmaker
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate project (unpack zip)
+        run: |
+          set -e
+          rm -rf _src && mkdir _src
+          unzip -q -o DVDMaker.zip -d _src
+          S=$(find _src -maxdepth 3 -name settings.gradle.kts | head -n1)
+          echo "APP_DIR=$(dirname "$S")" >> "$GITHUB_ENV"
+
+      - name: Add AI model to assets
+        run: |
+          set -e
+          MODEL=""
+          for c in plugin/model_fp16.onnx .github/plugin/model_fp16.onnx; do
+            [ -f "$GITHUB_WORKSPACE/$c" ] && MODEL="$GITHUB_WORKSPACE/$c" && break
+          done
+          [ -n "$MODEL" ] || { echo "::error::model_fp16.onnx not found"; exit 1; }
+          DEST="$GITHUB_WORKSPACE/$APP_DIR/app/src/main/assets/models"
+          mkdir -p "$DEST"
+          cp "$MODEL" "$DEST/bgremove.onnx"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download fonts
+        working-directory: ${{ env.APP_DIR }}
+        run: bash get_fonts.sh || true
+
+      - name: Instrumentation tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          working-directory: ${{ env.APP_DIR }}
+          script: gradle connectedDebugAndroidTest --no-daemon --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: ${{ env.APP_DIR }}/app/build/reports/androidTests
